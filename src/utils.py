@@ -31,3 +31,4 @@ def print_info(message: str) -> None:
     """Print an info message."""
     console.print(f"[bold blue]ℹ[/bold blue] {message}")
 
+

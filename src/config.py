@@ -46,3 +46,4 @@ def get_config() -> Config:
     """Get application configuration."""
     return Config.from_env()
 
+

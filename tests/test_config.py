@@ -48,3 +48,4 @@ def test_config_missing_project():
         with pytest.raises(ValueError, match="GOOGLE_CLOUD_PROJECT"):
             Config.from_env()
 
+
