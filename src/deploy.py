@@ -4,27 +4,122 @@ This module provides functions to deploy agents to Google Cloud's
 Vertex AI Agent Engine for production use.
 """
 
+import os
 import vertexai
 from vertexai import agent_engines
 from rich.console import Console
+from rich.panel import Panel
 
-from src.config import get_config
-from src.utils import print_header, print_success, print_error, print_info
+from dotenv import load_dotenv
+
+load_dotenv()
 
 console = Console()
+
+
+def print_header(title: str) -> None:
+    console.print(Panel(f"[bold cyan]{title}[/bold cyan]", expand=False))
+
+
+def print_success(message: str) -> None:
+    console.print(f"[bold green]✓[/bold green] {message}")
+
+
+def print_error(message: str) -> None:
+    console.print(f"[bold red]Error:[/bold red] {message}")
+
+
+def print_info(message: str) -> None:
+    console.print(f"[bold blue]ℹ[/bold blue] {message}")
+
+
+def get_config():
+    """Get configuration from environment."""
+    project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
+    if not project_id:
+        raise ValueError("GOOGLE_CLOUD_PROJECT environment variable is required.")
+    return {
+        "project_id": project_id,
+        "location": os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1"),
+        "staging_bucket": os.getenv("AGENT_ENGINE_STAGING_BUCKET"),
+        "model_name": os.getenv("MODEL_NAME", "gemini-2.0-flash"),
+    }
 
 
 def initialize_vertexai():
     """Initialize the Vertex AI SDK."""
     config = get_config()
     vertexai.init(
-        project=config.project_id,
-        location=config.location,
-        staging_bucket=config.staging_bucket,
+        project=config["project_id"],
+        location=config["location"],
+        staging_bucket=config["staging_bucket"],
     )
     print_success(
-        f"Initialized Vertex AI for project '{config.project_id}' in '{config.location}'"
+        f"Initialized Vertex AI for project '{config['project_id']}' in '{config['location']}'"
     )
+
+
+def create_agent_for_deployment(model_name: str = "gemini-2.0-flash"):
+    """Create an ADK agent for deployment.
+    
+    This function creates the agent inline to avoid import issues
+    when deployed to Agent Engine.
+    """
+    from google.adk.agents import Agent
+    from google.adk.tools import FunctionTool
+    from datetime import datetime
+
+    # Define tools inline (no external imports)
+    def get_current_time() -> str:
+        """Get the current date and time.
+
+        Returns:
+            A string with the current date and time.
+        """
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def calculate(expression: str) -> str:
+        """Evaluate a mathematical expression safely.
+
+        Args:
+            expression: A mathematical expression to evaluate (e.g., "2 + 2 * 3").
+
+        Returns:
+            The result of the calculation as a string.
+        """
+        allowed_chars = set("0123456789+-*/(). ")
+        if not all(c in allowed_chars for c in expression):
+            return "Error: Invalid characters in expression."
+        try:
+            result = eval(expression)
+            return str(result)
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+    # Create tools
+    tools = [
+        FunctionTool(get_current_time),
+        FunctionTool(calculate),
+    ]
+
+    # Create the agent
+    agent = Agent(
+        name="assistant",
+        model=model_name,
+        description="A helpful AI assistant that can answer questions and perform calculations.",
+        instruction="""You are a helpful and knowledgeable AI assistant. 
+
+Your capabilities include:
+- Answering questions on a wide range of topics
+- Performing mathematical calculations
+- Providing the current date and time
+- Helping users think through problems
+
+Always be accurate, helpful, and concise.""",
+        tools=tools,
+    )
+
+    return agent
 
 
 def deploy_agent(
@@ -40,26 +135,41 @@ def deploy_agent(
     Returns:
         The deployed AgentEngine instance.
     """
-    from src.agents.adk_agent import create_adk_agent
-
     print_header("Deploying ADK Agent to Agent Engine")
 
     # Initialize Vertex AI
     initialize_vertexai()
 
-    # Create the agent
-    print_info("Creating ADK agent...")
     config = get_config()
-    agent = create_adk_agent(model_name=config.model_name)
+    
+    # Check staging bucket
+    if not config["staging_bucket"]:
+        print_error(
+            "AGENT_ENGINE_STAGING_BUCKET is required for deployment. "
+            "Create a GCS bucket and add it to your .env file."
+        )
+        raise ValueError("Staging bucket not configured")
+
+    # Create the agent inline (no external module imports)
+    print_info("Creating ADK agent...")
+    agent = create_agent_for_deployment(model_name=config["model_name"])
 
     # Deploy to Agent Engine
     print_info("Deploying to Agent Engine (this may take a few minutes)...")
+
+    # Requirements needed in the cloud environment
+    requirements = [
+        "google-cloud-aiplatform[adk,agent_engines]>=1.87.0",
+        "google-adk",
+        "google-genai",
+    ]
 
     try:
         remote_agent = agent_engines.create(
             agent_engine=agent,
             display_name=display_name,
             description=description,
+            requirements=requirements,
         )
 
         print_success(f"Agent deployed successfully!")
