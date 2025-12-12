@@ -3,13 +3,17 @@
 This module demonstrates how to build agents using Google's ADK framework.
 ADK provides a clean interface for building AI agents with tools, memory,
 and conversation management.
+
+Includes MCP (Model Context Protocol) integration for Google Cloud Storage.
 """
 
 from google.adk.agents import Agent
 from google.adk.tools import FunctionTool
+from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset, StdioServerParameters
 
 
-# Define custom tools that the agent can use
+# ============== Basic Tools ==============
+
 def get_current_time() -> str:
     """Get the current date and time.
 
@@ -17,7 +21,6 @@ def get_current_time() -> str:
         A string with the current date and time.
     """
     from datetime import datetime
-
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
@@ -30,7 +33,6 @@ def calculate(expression: str) -> str:
     Returns:
         The result of the calculation as a string.
     """
-    # Only allow safe mathematical operations
     allowed_chars = set("0123456789+-*/(). ")
     if not all(c in allowed_chars for c in expression):
         return "Error: Invalid characters in expression. Only numbers and basic operators allowed."
@@ -42,21 +44,10 @@ def calculate(expression: str) -> str:
         return f"Error: {str(e)}"
 
 
-def search_web(query: str) -> str:
-    """Simulate a web search (placeholder for actual implementation).
-
-    Args:
-        query: The search query.
-
-    Returns:
-        Search results (simulated).
-    """
-    # In a real implementation, you'd integrate with a search API
-    return f"Search results for '{query}': [This is a placeholder. Integrate with a real search API for production use.]"
-
+# ============== Agent Creation ==============
 
 def create_adk_agent(model_name: str = "gemini-2.0-flash") -> Agent:
-    """Create an ADK-based agent with custom tools.
+    """Create an ADK-based agent with custom tools (without MCP).
 
     Args:
         model_name: The name of the model to use (default: gemini-2.0-flash).
@@ -64,18 +55,15 @@ def create_adk_agent(model_name: str = "gemini-2.0-flash") -> Agent:
     Returns:
         A configured ADK Agent instance.
     """
-    # Create tool instances
     tools = [
         FunctionTool(get_current_time),
         FunctionTool(calculate),
-        FunctionTool(search_web),
     ]
 
-    # Create the agent with a system instruction
     agent = Agent(
         name="assistant",
         model=model_name,
-        description="A helpful AI assistant that can answer questions, perform calculations, and help with various tasks.",
+        description="A helpful AI assistant that can answer questions and perform calculations.",
         instruction="""You are a helpful and knowledgeable AI assistant. 
 
 Your capabilities include:
@@ -84,68 +72,68 @@ Your capabilities include:
 - Providing the current date and time
 - Helping users think through problems
 
-Always be:
-- Accurate and helpful
-- Clear and concise in your responses
-- Honest about your limitations
-
-When using tools, explain what you're doing and why.""",
+Always be accurate, helpful, and concise.""",
         tools=tools,
     )
 
     return agent
 
 
-# Example of a more specialized agent
-def create_code_assistant(model_name: str = "gemini-2.0-flash") -> Agent:
-    """Create a specialized coding assistant agent.
+async def create_adk_agent_with_gcs_mcp(model_name: str = "gemini-2.0-flash") -> Agent:
+    """Create an ADK agent with Google Cloud Storage via MCP.
+
+    This function creates an agent that can interact with GCS using the
+    @google-cloud/storage-mcp Node.js MCP server.
 
     Args:
-        model_name: The name of the model to use.
+        model_name: The name of the model to use (default: gemini-2.0-flash).
 
     Returns:
-        A configured ADK Agent for coding tasks.
+        A configured ADK Agent instance with GCS tools.
     """
-
-    def analyze_code(code: str, language: str = "python") -> str:
-        """Analyze code for potential issues.
-
-        Args:
-            code: The code to analyze.
-            language: The programming language.
-
-        Returns:
-            Analysis results.
-        """
-        # Placeholder - in production, integrate with a linter or static analyzer
-        return f"Analyzed {language} code ({len(code)} characters). [Integrate with real analysis tools for production.]"
-
-    tools = [
-        FunctionTool(analyze_code),
+    # Basic tools
+    basic_tools = [
         FunctionTool(get_current_time),
+        FunctionTool(calculate),
     ]
 
-    agent = Agent(
-        name="code_assistant",
-        model=model_name,
-        description="A specialized assistant for software development and coding tasks.",
-        instruction="""You are an expert software developer and coding assistant.
-
-Your expertise includes:
-- Writing clean, efficient, and well-documented code
-- Debugging and troubleshooting issues
-- Explaining programming concepts clearly
-- Reviewing code and suggesting improvements
-- Best practices for software development
-
-When helping with code:
-1. Always explain your reasoning
-2. Provide complete, working examples when possible
-3. Consider edge cases and error handling
-4. Follow language-specific conventions and best practices""",
-        tools=tools,
+    # Connect to the GCS MCP server using npx (auto-downloads if needed)
+    gcs_mcp_tools, exit_stack = await MCPToolset.from_server(
+        connection_params=StdioServerParameters(
+            command="npx",
+            args=["-y", "@google-cloud/storage-mcp"],
+        )
     )
 
-    return agent
+    # Combine basic tools with MCP tools
+    all_tools = basic_tools + gcs_mcp_tools
+
+    agent = Agent(
+        name="gcs_assistant",
+        model=model_name,
+        description="A helpful AI assistant with Google Cloud Storage capabilities.",
+        instruction="""You are a helpful AI assistant with access to Google Cloud Storage.
+
+Your capabilities include:
+- Managing files in Google Cloud Storage (list, read, write, delete)
+- Answering questions on a wide range of topics
+- Performing mathematical calculations
+- Providing the current date and time
+
+When working with GCS:
+- Always confirm bucket and file names with the user before making changes
+- Be careful with delete operations - ask for confirmation
+- Explain what you're doing when accessing storage
+
+Always be accurate, helpful, and concise.""",
+        tools=all_tools,
+    )
+
+    # Return both agent and exit_stack for proper cleanup
+    return agent, exit_stack
 
 
+# ============== Agent for ADK folder structure ==============
+# This is used by `adk web` command
+
+root_agent = create_adk_agent()
