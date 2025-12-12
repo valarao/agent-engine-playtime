@@ -1,0 +1,16 @@
+# Google Cloud Vertex AI Agent Engine SDK
+google-cloud-aiplatform[agent_engines,adk]>=1.112.0
+
+# Google ADK for building agents
+google-adk>=0.3.0
+
+# Utility packages
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+rich>=13.0.0
+
+# Development tools
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+black>=24.0.0
+ruff>=0.8.0
